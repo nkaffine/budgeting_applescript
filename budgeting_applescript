@@ -1,0 +1,1351 @@
+-- The filePath of the file
+set filePath to "/Users/Nick/Library/Mobile Documents/com~apple~Numbers/Documents/College Finances/College Finances.numbers"
+set theDocument to "College Finances"
+-- Character id for capital C
+set startID to 67
+
+-- Telling which application to open in between actions
+on switch()
+	tell application "College Budget" to activate
+end switch
+
+
+-- Any Any str -> Display Dialog or Nothing
+-- If the two values are different, pops up a dialog that says
+-- with the str
+on checkExpect(a1, a2, str)
+	if a1 is not a2 then
+		try
+			display dialog (str & " expected " & a2 & " but got " & a1)
+		on error
+			display dialog str
+		end try
+	end if
+end checkExpect
+
+
+
+-- A transaction is {type, amount, transactionMethod, typeOfTransaction, commnet, dateOfTransaction}
+set transaction1 to {type:"earn", amount:7, transactionMethod:"Credit Card", typeOfTransaction:"Snacking out", comment:"Chipotle", dateOfTransaction:current date}
+-- Where:
+-- Transaction Type is one of:
+-- 	-Earn
+--	-Spend
+-- 	-Transfer
+--	-Accounts Receivable
+-- Amount is the amount spent in dollars
+-- Transaction Method is one of:
+--	-Cash
+--	-Credit Card
+--	-Debit Card
+--	-Venmo
+-- Type of Purchase is one of:
+--	-Groceries
+--	-Snacking out
+--	-Meals Out
+--	-Fun
+--	-Phone
+-- 	-Living Stuff
+-- 	-Earnings
+-- 	-Transfer
+-- Comment is a String describing the transaction
+-- dateOfTransaction is the date the transaction occured
+
+-- String Number String String String Date -> transaction
+-- Creates a transaction with the given fields
+checkExpect((makeTransaction("earn", 7, "Credit Card", "Snacking out", "Chipotle", current date)), transaction1, "Make Transaction Failed")
+on makeTransaction(t, a, tm, tot, c, dot)
+	set theTransaction to {type:t, amount:a, transactionMethod:tm, typeOfTransaction:tot, comment:c, dateOfTransaction:dot}
+end makeTransaction
+
+-- List of Transaction Types
+set transactionTypes to {"Spend", "Earn", "Transfer", "Accounts Receivable"}
+
+-- List of Transaction Methods
+set transactionMethods to {"Credit Card", "Debit Card", "Cash", "Venmo"}
+
+checkExpect((createTypesOfSpending(startID, filePath, theDocument, "Daily Tracking", "Semester 2")), {"Groceries", "Snacking out", "Meals out", "Fun", "Phone", "Living Stuff"}, "CreateTypesOfSpending Failed")
+-- Number, String, String, String, String, String  -> [List-of String]
+-- Creates a list of all the categories for spending
+on createTypesOfSpending(startNumber, filePath, theDocument, theSheet, theTable)
+	set theList to {}
+	set theValue to ""
+	repeat until theValue is "Total Spent"
+		set theValue to getCellValue(filePath, theDocument, theSheet, theTable, (makeCellPath(startNumber, 1)))
+		set theList to ((theList & theValue) as list)
+		set startNumber to startNumber + 1
+	end repeat
+	set theList to (items 1 thru ((count of theList) - 1) of theList)
+	return theList
+end createTypesOfSpending
+
+-- Setting the list of Purchase types
+set purchaseTypes to (createTypesOfSpending(startID, filePath, theDocument, "Daily Tracking", "Semester 2"))
+
+-- Number Number -> Letter
+-- Takes the starting character id and the row number
+-- and generates a cell path
+checkExpect((makeCellPath(67, 2)), "C2", "MakeCellPath failed")
+on makeCellPath(n1, n2)
+	set theCellPath to (((character id n1) & n2) as string)
+	return theCellPath
+end makeCellPath
+
+
+-- String, String, String, String -> Number
+-- Gets the row count in a table given by the
+-- filepath, document, sheet, and table
+on getRowCount(filePath, theDocument, theSheet, theTable)
+	tell application "Numbers"
+		open filePath
+		tell document theDocument
+			tell sheet theSheet
+				tell table theTable
+					get row count
+				end tell
+			end tell
+		end tell
+	end tell
+end getRowCount
+
+-- String, String, String, String, StartNumber -> [List-of String]
+-- Based on the filepath, document, sheet, and table, creates
+-- a list of all accounts available
+on getAccounts(filePath, theDocument, theSheet, theTable, startNumber)
+	set i to getRowCount(filePath, theDocument, theSheet, theTable)
+	set theList to {}
+	repeat with n from 2 to i
+		getCellValue(filePath, theDocument, theSheet, theTable, (("A" & n) as text))
+		set theValue to the result as text
+		set theList to theList & theValue as list
+	end repeat
+	return theList
+end getAccounts
+
+
+set theAccounts to (getAccounts(filePath, theDocument, "Budget", "Account Balances", 1))
+
+
+-- [List-of String] [List-of String] [List-of String] [List-of String] -> Transaction
+-- Collects all the data necesarry about a certain puchase 
+-- and creates the appropriate structure
+on createTransaction(filePath, theDocument, transactionTypes, transactionMethods, purchaseTypes, accounts)
+	choose from list transactionTypes with prompt "What type of transaction was this?" default items (item 1 of transactionTypes)
+	set theTransactionType to the result as text
+	display dialog "What was the amount?" default answer ""
+	set theAmount to the text returned of result as number
+	set aTransaction to makeTransaction("", theAmount, "", "", "", "")
+	if theTransactionType is "Spend" then
+		set thePredictions to spendPredict(filePath, theDocument, aTransaction)
+		if thePredictions is "None" then
+			set commentPrediction to ""
+			set methodPrediction to (item 1 of transactionMethods)
+			set typePrediction to (item 1 of purchaseTypes)
+		else
+			set commentPrediction to (item 1 of thePredictions)
+			set methodPrediction to (item 2 of thePredictions)
+			set typePrediction to (item 3 of thePredictions)
+		end if
+		display dialog "What caused this transaction?" default answer commentPrediction
+		set theComment to the text returned of the result as text
+		choose from list transactionMethods with prompt "What payment method did you use?" default items methodPrediction
+		set theTransactionMethod to the result as text
+		choose from list purchaseTypes with prompt "What type of purchase did you make?" default items typePrediction
+		set thePurchaseType to the result as text
+	end if
+	if theTransactionType is "Earn" then
+		set thePredictions to earnPredict(filePath, theDocument, aTransaction)
+		if thePredictions is "None" then
+			set commentPrediction to ""
+			set accountPrediction to (item 1 of accounts)
+		else
+			set commentPrediction to (item 1 of thePredictions)
+			set accountPrediction to (item 2 of thePredictions)
+		end if
+		display dialog "What caused this transaction?" default answer commentPrediction
+		set theComment to the text returned of the result as text
+		choose from list accounts with prompt "In which account was the money earned?" default items accountPrediction
+		set theTransactionMethod to the result as text
+		set thePurchaseType to "Earnings"
+	end if
+	if theTransactionType is "Transfer" then
+		set thePredictions to transfersPredict(filePath, theDocument, aTransaction)
+		if thePredictions is "None" then
+			set commentPrediction to ""
+			set fromPrediction to (item 1 of accounts)
+			set toPrediction to (item 1 of accounts)
+		else
+			set commentPrediction to (item 1 of thePredictions)
+			set fromPrediction to (item 2 of thePredictions)
+			set toPrediction to (item 3 of thePredictions)
+		end if
+		display dialog "What caused this transaction?" default answer commentPrediction
+		set theComment to the text returned of the result as text
+		choose from list accounts with prompt "From which account was the money transfered?" default items fromPrediction
+		set theFrom to the result as text
+		choose from list accounts with prompt "To which account was the money transfered?" default items toPrediction
+		set theTo to the result as text
+		set theTransactionMethod to ((theFrom & " -> " & theTo) as text)
+		set thePurchaseType to "Transfers"
+	end if
+	if theTransactionType is "Accounts Receivable" then
+		set theList to accountsReceivableList(filePath, theDocument) & "New Account"
+		set thePredictions to arPredict(filePath, theDocument, aTransaction)
+		if thePredictions is "None" then
+			set commentPrediction to ""
+			set accountPrediction to item 1 of theList
+		else
+			set commentPrediction to (item 1 of thePredictions)
+			set accountPrediction to (item 2 of thePredictions)
+		end if
+		display dialog "What caused this transaction?" default answer commentPrediction
+		set theComment to the text returned of the result as text
+		choose from list theList with prompt "What account is creating a receivable?" default items accountPrediction
+		set theResponse to the result as text
+		if theResponse is "New Account" then
+			display dialog "What is the name of the new account?" default answer ""
+			set theTransactionMethod to the text returned of the result
+			if accountReceivableExist(theList, theTransactionMethod) is false then
+				repeat until accountReceivableExist(theList, theTransactionMethod) is false
+					display dialog "That is already an account, please input another name." default answer ""
+					set theTransactionMethod to the text returned of the result
+				end repeat
+			end if
+			createNewAccountReceivable(filePath, theDocument, theTransactionMethod)
+		else
+			set theTransactionMethod to theResponse
+		end if
+		set thePurchaseType to "Accounts Receivable"
+	end if
+	display dialog "When did the transaction take place?" default answer ""
+	set theDate to makeDate((the text returned of the result as text))
+	makeTransaction(theTransactionType, theAmount, theTransactionMethod, thePurchaseType, theComment, theDate)
+end createTransaction
+
+
+-- String, String -> [List-of String]
+-- Gets a list of all people who have accounts receivable accounts
+on accountsReceivableList(filePath, theDocument)
+	set rowCount to getRowCount(filePath, theDocument, "Debts", "Accounts Receivable")
+	set theList to {}
+	repeat with i from 2 to rowCount
+		set theValue to getCellValue(filePath, theDocument, "Debts", "Accounts Receivable", (("A" & i) as text))
+		set theList to theList & theValue
+	end repeat
+	return theList
+end accountsReceivableList
+
+checkExpect((accountReceivableExist({"Hello", "Goodbye", "Yo"}, "Goodbye")), true, "ARE Failed")
+checkExpect((accountReceivableExist({"Hello", "Goodbye", "Yo"}, "Toby")), false, "ARE Failed")
+-- String, String, String -> Boolean
+-- Checks to see if the account exists in the filepath and document
+on accountReceivableExist(theList, theAccount)
+	set i to 1
+	set inList to false
+	repeat until inList is true or i = (count of theList)
+		if item i of theList is theAccount then
+			set inList to true
+		end if
+		set i to i + 1
+	end repeat
+	return inList
+end accountReceivableExist
+
+-- String, String, String -> Nil
+-- Creates a new account receivable based on the file path
+-- the document, and the name of the account
+on createNewAccountReceivable(filePath, theDocument, theAccount)
+	makeNewRow(filePath, theDocument, "Debts", "Accounts Receivable")
+	set theRowCount to getRowCount(filePath, theDocument, "Debts", "Accounts Receivable")
+	setCellValue(filePath, theDocument, "Debts", "Accounts Receivable", (("A" & theRowCount) as text), theAccount)
+end createNewAccountReceivable
+
+
+-- Date -> String
+-- Converts the date into MM/DD/YYYY
+--checkExpect((dateToString(current date)), "3/6/2017", "DateToString failed")
+on dateToString(theDate)
+	set theDay to (day of (date theDate))
+	set theMonth to (month of (date theDate)) as integer
+	set theYear to (year of (date theDate))
+	set theNewDate to theMonth & "/" & theDay & "/" & theYear
+end dateToString
+
+-- Make Date: String -> Date
+-- Converts the given string into a date
+on makeDate(theDate)
+	if ((items 1 thru 4 of theDate) as string) is "Next" then
+		nextDay((items 6 thru (count of theDate) of theDate) as text)
+	else if ((items 1 thru 4 of theDate) as string) is "Last" then
+		lastDay((items 6 thru (count of theDate) of theDate) as text)
+	else if theDate is "Today" then
+		date string of (current date)
+	else if theDate is "Yesterday" then
+		date string of ((current date) - (1 * days))
+	else
+		date string of (date theDate)
+	end if
+end makeDate
+
+-- String -> Date
+-- Takes a string and produces that day
+-- the week after the current date
+--checkExpect((nextDay("Friday")), (date string of (date "Friday, March 10, 2017 at 12:00:00 AM")), "NextDay Failed")
+on nextDay(theString)
+	set i to 1
+	set theDay to ((current date) + (i * days))
+	repeat until (weekday of theDay as text) is theString
+		set i to i + 1
+		set theDay to ((current date) + (i * days))
+	end repeat
+	return date string of theDay
+end nextDay
+
+-- String -> Date
+-- Takes a string and produces that day in the
+-- week before the current date
+--checkExpect((lastDay("Friday")), (date string of (date "Friday, March 3, 2017 at 12:00:00 AM")), "LastDay Failed")
+on lastDay(theString)
+	set i to -1
+	set theDay to ((current date) + (i * days))
+	repeat until (weekday of theDay as text) is theString
+		set i to i - 1
+		set theDay to ((current date) + (i * days))
+	end repeat
+	return date string of theDay
+end lastDay
+
+-- String, String, String, String, String -> Any
+-- Gets the value of the cell in the given filePath, document
+-- sheet, table, and cellPath
+on getCellValue(filePath, theDocument, theSheet, theTable, theCell)
+	tell application "Numbers"
+		open filePath
+		tell document theDocument
+			tell sheet theSheet
+				tell table theTable
+					get value of cell theCell
+				end tell
+			end tell
+		end tell
+	end tell
+end getCellValue
+
+-- Display dialog boxes for the user to input information
+-- for a transaction
+
+-- String, String, String, String, Cell Path, Any -> Nil
+-- Inputs the value into the cell given
+on setCellValue(filePath, theDocument, theSheet, theTable, theCell, theValue)
+	tell application "Numbers"
+		open filePath
+		tell document theDocument
+			tell sheet theSheet
+				tell table theTable
+					set value of cell theCell to theValue
+				end tell
+			end tell
+		end tell
+	end tell
+end setCellValue
+
+-- String, String, String, String, Cell Path, Comment -> Nil
+-- Inserts the given comment into the given cell
+on insertComment(filePath, theDocument, theSheet, theTable, theCell, theComment)
+	tell application "Numbers"
+		activate
+		open filePath
+		tell document theDocument
+			tell sheet theSheet
+				tell table theTable
+					set selection range to cell theCell
+				end tell
+			end tell
+		end tell
+	end tell
+	tell application "System Events"
+		keystroke "k" using shift down & command down
+		keystroke theComment
+		key code 36
+		keystroke "k" using shift down & command down
+	end tell
+end insertComment
+
+-- Number, String -> String
+-- Creates a comment in the right format based
+-- on the details of the purchase and the value
+checkExpect((makeComment(transaction1)), "$7 Chipotle", "MakeComment Failed")
+on makeComment(theTransaction)
+	return (("$" & (amount of theTransaction) & " " & (comment of theTransaction)) as text)
+end makeComment
+
+-- String, String -> Cell Path
+-- Takes a string for the column and a string for the row
+-- and creates a cell path for that cell
+checkExpect((getCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", (makeCellPath2("Snacking out", "11/26/2016")))), 4.7, "Make Cell Path Failed")
+on makeCellPath2(theColumn, theRow)
+	return ((theColumn & " " & theRow) as text)
+end makeCellPath2
+
+on makeCellPath3(theTransaction)
+	return (((typeOfTransaction of theTransaction) & " " & (dateToString(dateOfTransaction of theTransaction))) as text)
+end makeCellPath3
+
+--set transaction1 to {type:"earn", amount:7, transactionMethod:"Credit Card", typeOfTransaction:"Snacking out", comment:"Chipotle", dateOfTransaction:current date}
+
+-- String, String, Transaction -> Nil
+-- Inputs the transaction into the spreadsheet
+on inputTransaction(filePath, theDocument, theTransaction)
+	if type of theTransaction is "Earn" then
+		insertEarnTransaction(filePath, theDocument, theTransaction)
+	else if type of theTransaction is "Spend" then
+		insertSpendTransaction(filePath, theDocument, theTransaction)
+	else if type of theTransaction is "Transfer" then
+		insertTransferTransaction(filePath, theDocument, theTransaction)
+	end if
+	if type of theTransaction is "Accounts Receivable" then
+		insertAccountsReceivableTransaction(filePath, theDocument, theTransaction)
+	end if
+end inputTransaction
+
+
+-- String, String, Transaction -> Nil
+-- Updates the spreadsheet based on the given accounts receivable
+-- transaction
+on insertAccountsReceivableTransaction(filePath, theDocument, theTransaction)
+	set theCellPath to makeCellPath3(theTransaction)
+	set theNewCellValue to getNewCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, theTransaction)
+	setCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, ("$" & theNewCellValue))
+	set theComment to ("$" & (amount of theTransaction) & " to account: " & (transactionMethod of theTransaction) & " " & (comment of theTransaction)) as text
+	insertComment(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, theComment)
+	updateAccountsReceivable(filePath, theDocument, theTransaction)
+end insertAccountsReceivableTransaction
+
+-- String, String, Transaction -> Nil
+-- Updates the accounts receivable account based on the
+-- given transaction
+on updateAccountsReceivable(filePath, theDocument, theTransaction)
+	set theCellPath to makeCellPath2("Amount", (transactionMethod of theTransaction))
+	set theNewValue to getNewCellValue(filePath, theDocument, "Debts", "Accounts Receivable", theCellPath, theTransaction)
+	setCellValue(filePath, theDocument, "Debts", "Accounts Receivable", theCellPath, ("$" & theNewValue))
+	insertComment(filePath, theDocument, "Debts", "Accounts Receivable", theCellPath, makeComment(theTransaction))
+end updateAccountsReceivable
+
+-- String, String, Transaction -> Nil
+-- Updates the appropriate account for a spending transaction
+on updateAccountSpend(filePath, theDocument, theTransaction)
+	if (transactionMethod of theTransaction) is "Credit Card" then
+		set theCellPath to makeCellPath2("Amount", "Credit Card")
+		set theCurrentBalance to getCellValue(filePath, theDocument, "Budget", "Account Balances", theCellPath)
+		set theNewBalance to (theCurrentBalance + (amount of theTransaction))
+		setCellValue(filePath, theDocument, "Budget", "Account Balances", theCellPath, ("$" & theNewBalance))
+	else
+		if the (transactionMethod of theTransaction) is "Debit Card" then
+			set theCellPath to makeCellPath2("Amount", "Checking")
+		else if (transactionMethod of theTransaction) is "Cash" then
+			set theCellPath to makeCellPath2("Amount", "Cash")
+		else if (transactionMethod of theTransaction) is "Venmo" then
+			set theCellPath to makeCellPath2("Amount", "Venmo")
+		end if
+		set theCurrentBalance to getCellValue(filePath, theDocument, "Budget", "Account Balances", theCellPath)
+		set theNewBalance to (theCurrentBalance - (amount of theTransaction))
+		setCellValue(filePath, theDocument, "Budget", "Account Balances", theCellPath, ("$" & theNewBalance))
+	end if
+end updateAccountSpend
+
+
+-- String, String, Spend Transaction -> Nil
+-- Inputs a spending transaction into the spreadsheet
+on insertSpendTransaction(filePath, theDocument, theTransaction)
+	set theCellPath to (makeCellPath3(theTransaction))
+	set theNewCellValue to (getNewCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, theTransaction))
+	setCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, ("$" & theNewCellValue))
+	insertComment(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, makeComment(theTransaction))
+	updateAccountSpend(filePath, theDocument, theTransaction)
+end insertSpendTransaction
+
+-- String, String, Transaction -> Nil
+-- Updates the accounts from earning
+on updateAccountEarning(filePath, theDocument, theTransaction)
+	set theCellPath to ("Amount " & (transactionMethod of theTransaction))
+	set theCurrentBalance to getCellValue(filePath, theDocument, "Budget", "Account Balances", theCellPath)
+	if (transactionMethod of theTransaction) is "Credit Card" then
+		set theNewBalance to (theCurrentBalance - (amount of theTransaction))
+	else
+		set theNewBalance to (theCurrentBalance + (amount of theTransaction))
+	end if
+	setCellValue(filePath, theDocument, "Budget", "Account Balances", theCellPath, ("$" & theNewBalance))
+end updateAccountEarning
+
+-- String, String, Earn Transaction -> Nil
+-- Inputs an earning transaction into the spreadsheet
+on insertEarnTransaction(filePath, theDocument, theTransaction)
+	set theCellPath to (makeCellPath3(theTransaction))
+	set theNewCellValue to getNewCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, theTransaction)
+	setCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, ("$" & theNewCellValue))
+	insertComment(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, makeComment(theTransaction))
+	updateAccountEarning(filePath, theDocument, theTransaction)
+end insertEarnTransaction
+
+
+-- String, String, Transfer Transaction -> Nil
+-- Inserts a transfer transaction into the spreadsheet
+on insertTransferTransaction(filePath, theDocument, theTransaction)
+	set theCellPath to (makeCellPath3(theTransaction))
+	set theNewCellValue to getNewCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, theTransaction)
+	setCellValue(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, ("$" & theNewCellValue))
+	set theAccountTransfer to getAccountTransfer(theTransaction)
+	set theComment to ("$" & (amount of theTransaction) & " " & (fromAccount of theAccountTransfer) & " -> " & (toAccount of theAccountTransfer) & " " & (comment of theTransaction))
+	insertComment(filePath, theDocument, "Daily Tracking", "Semester 2", theCellPath, theComment)
+	updateAccountTransfer(filePath, theDocument, theTransaction, theAccountTransfer)
+end insertTransferTransaction
+
+-- String, String, Transaction, Account Transfer -> Nil
+-- Updates the accounts for an account transfer
+on updateAccountTransfer(filePath, theDocument, theTransaction, theAccountTransfer)
+	set cellPath1 to (makeCellPath2("Amount", (fromAccount of theAccountTransfer)))
+	set cellPath2 to (makeCellPath2("Amount", (toAccount of theAccountTransfer)))
+	set currentBalance1 to getCellValue(filePath, theDocument, "Budget", "Account Balances", cellPath1)
+	set currentBalance2 to getCellValue(filePath, theDocument, "Budget", "Account Balances", cellPath2)
+	if (fromAccount of theAccountTransfer) is "Credit Card" then
+		set theNewBalance1 to currentBalance1 + (amount of theTransaction)
+	else
+		set theNewBalance1 to currentBalance1 - (amount of theTransaction)
+	end if
+	if (toAccount of theAccountTransfer) is "Credit Card" then
+		set theNewBalance2 to currentBalance2 - (amount of theTransaction)
+	else
+		set theNewBalance2 to currentBalance2 + (amount of theTransaction)
+	end if
+	setCellValue(filePath, theDocument, "Budget", "Account Balances", cellPath1, ("$" & theNewBalance1))
+	setCellValue(filePath, theDocument, "Budget", "Account Balances", cellPath2, ("$" & theNewBalance2))
+end updateAccountTransfer
+
+-- String, String, String, String, Cell Path, Transaction -> Number
+-- Adds the value of the cell to the value of the transaction
+on getNewCellValue(filePath, theDocument, theSheet, theTable, theCell, theTransaction)
+	getCellValue(filePath, theDocument, theSheet, theTable, theCell)
+	try
+		set theCellValue to the result as number
+	on error
+		set theCellValue to 0
+	end try
+	set theNewCellValue to theCellValue + (amount of theTransaction)
+	return theNewCellValue
+end getNewCellValue
+
+
+
+
+-- An Account Transfer is {fromAccount: String, toAccount: string}
+-- Transaction -> Account Transfer
+set transaction2 to {type:"Transfer", amount:10, transactionMethod:"Savings -> Credit Card", typeOfTransaction:"Transfers", comment:"Credit Card Payment", dateOfTransaction:"Monday, March 6, 2017"}
+checkExpect((getAccountTransfer(transaction2)), {fromAccount:"Savings", toAccount:"Credit Card"}, "Get Accounts transfer Failed")
+on getAccountTransfer(theTransaction)
+	set theTransfer to (transactionMethod of theTransaction)
+	set i to 1
+	repeat until (item i of theTransfer) is "-"
+		set i to i + 1
+	end repeat
+	set fAccount to (items 1 thru (i - 2) of theTransfer) as text
+	set tAccount to (items (i + 3) thru (count of theTransfer) of theTransfer) as text
+	set theAccountTransfer to {fromAccount:fAccount, toAccount:tAccount}
+end getAccountTransfer
+
+-- String, String, Transaction -> Nil
+-- Inputs the transaction into the spreadsheet
+on insertTransaction(filePath, theDocument, theTransaction)
+	makeNewRow(filePath, theDocument, "Transaction Tracking", "Transaction Tracking")
+	set theRowCount to getRowCount(filePath, theDocument, "Transaction Tracking", "Transaction Tracking")
+	setCellValue(filePath, theDocument, "Transaction Tracking", "Transaction Tracking", (("A" & theRowCount) as string), ((weekday of (date (dateOfTransaction of theTransaction))) as text))
+	setCellValue(filePath, theDocument, "Transaction Tracking", "Transaction Tracking", (("B" & theRowCount) as string), (dateOfTransaction of theTransaction))
+	setCellValue(filePath, theDocument, "Transaction Tracking", "Transaction Tracking", (("C" & theRowCount) as string), (type of theTransaction))
+	setCellValue(filePath, theDocument, "Transaction Tracking", "Transaction Tracking", (("D" & theRowCount) as string), ("$" & (amount of theTransaction)))
+	if (count of (transactionMethod of theTransaction)) is greater than 11 then
+		set theAccountTransfer to getAccountTransfer(theTransaction)
+		set theValue to ((fromAccount of theAccountTransfer) & " -> " & (toAccount of theAccountTransfer)) as text
+		setCellValue(filePath, theDocument, "Transaction Tracking", "Transaction Tracking", (("E" & theRowCount) as string), theValue)
+	else
+		setCellValue(filePath, theDocument, "Transaction Tracking", "Transaction Tracking", (("E" & theRowCount) as string), (transactionMethod of theTransaction))
+	end if
+	setCellValue(filePath, theDocument, "Transaction Tracking", "Transaction Tracking", (("F" & theRowCount) as string), (typeOfTransaction of theTransaction))
+	setCellValue(filePath, theDocument, "Transaction Tracking", "Transaction Tracking", (("G" & theRowCount) as string), (comment of theTransaction))
+end insertTransaction
+
+-- String, String, String, String -> Nil
+-- Inserts a row into the table
+on makeNewRow(filePath, theDocument, theSheet, theTable)
+	tell application "Numbers"
+		open filePath
+		tell document theDocument
+			tell sheet theSheet
+				tell table theTable
+					make new row
+				end tell
+			end tell
+		end tell
+	end tell
+end makeNewRow
+
+
+-- Start processing prediction formats
+-------------------------------------------------------------------------------------------------------------------------------------------------
+-- String -> [List-of [List-of String]]
+-- Gets a list of predictions from the text given
+checkExpect((predictionsToListOfPredictions("Money to help pay for the whiteboard,1;")), {{"Money to help pay for the whiteboard", "1"}}, "predictions to list failed")
+checkExpect((predictionsToListOfPredictions("Money to help pay for the whiteboard,1;Northeastern Payroll,1;")), {{"Money to help pay for the whiteboard", "1"}, {"Northeastern Payroll", "1"}}, "predictions to list failed")
+on predictionsToListOfPredictions(thePredictions)
+	set theList to {}
+	repeat until thePredictions is ""
+		set theThing to splitByCharacter(thePredictions, ";")
+		set firstPart to (item 1 of theThing)
+		set theList to theList & {firstPart}
+		try
+			set thePredictions to (item 2 of theThing)
+		on error
+			set thePredictions to ""
+		end try
+	end repeat
+	set theList2 to {}
+	repeat with i from 1 to (count of theList)
+		set theThing to splitByCharacter((item i of theList), ",")
+		set theList2 to theList2 & {theThing}
+	end repeat
+	return theList2
+end predictionsToListOfPredictions
+-- String, 1String -> [List-of String]
+-- Splits the string around the given 1String
+checkExpect((splitByCharacter("hello:there", ":")), {"hello", "there"}, "split by character failed")
+checkExpect((splitByCharacter("hello:", ":")), {"hello"}, "split by character failed")
+on splitByCharacter(str, char)
+	set i to 1
+	repeat until item i of str is char or i is (count of str)
+		set i to i + 1
+	end repeat
+	if i is (count of str) then
+		return {((items 1 thru ((count of str) - 1) of str) as text)}
+	else
+		set firstPart to ((items 1 thru (i - 1) of str) as text)
+		set lastPart to ((items (i + 1) thru (count of str) of str) as text)
+		return {firstPart, lastPart}
+	end if
+end splitByCharacter
+-- [List-of [List-of String]] -> String
+-- Converts a list of predictions into the string format for the spreadsheet
+-- {{"Credit Card Payment","1"},{"Whiteboard","1"}} should be "Credit Card Payment,1;Whiteboard,1;"
+checkExpect((listOfPredictionsToString({{"Credit Card Payment", "1"}, {"Whiteboard", "1"}})), "Credit Card Payment,1;Whiteboard,1;", "list of predictions to string failed")
+on listOfPredictionsToString(lops)
+	set theString to ""
+	repeat with i from 1 to (count of lops)
+		set theName to (item 1 of (item i of lops)) as text
+		set theTimes to (item 2 of (item i of lops)) as text
+		set theText to ((theName & "," & theTimes & ";") as text)
+		set theString to theString & theText
+	end repeat
+	return theString
+end listOfPredictionsToString
+
+-- End processing prediction formats
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+
+-- Set value of earn prediction
+
+
+-- Set value of spend prediction
+
+-- Set value of transfer prediction
+
+-- Set value of Accounts Receivable predictin
+
+
+
+
+
+
+
+
+
+
+-- Start adding an occurence of a probability from transaction tracking table
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+-- String String Transaction Number -> Nul
+-- Updates the prediction value in the spreadsheet
+on updateOldPredictionTransactionTracking(filePath, theDocument, theTransaction, theRowNumber)
+	set theSheet to "Predicting Transaction Name"
+	set theType to (type of theTransaction)
+	if theType is "Spend" then
+		updatePredictionSpend(filePath, theDocument, theTransaction, theRowNumber)
+	else if theType is "Transfer" then
+		updatePredictionTransfer(filePath, theDocument, theTransaction, theRowNumber)
+	else if theType is "Accounts Receivable" or theType is "Earn" then
+		updatePredictionARAndEarn(filePath, theDocument, theTransaction, theType, theRowNumber)
+	end if
+end updateOldPredictionTransactionTracking
+
+-- Updating the prediction for a spending item from the transaction tracking table
+on updatePredictionSpend(filePath, theDocument, theTransaction, theRowNumber)
+	set theSheet to "Predicting Transaction Name"
+	set theTable to "Spend"
+	-- Getting the current predictions
+	set theNamePrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRowNumber as text))
+	set theMethodPrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRowNumber as text))
+	set theTypePrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("D" & theRowNumber as text))
+	-- Updating the predictions
+	set theNewNamePrediction to update1Prediction(theNamePrediction, (comment of theTransaction))
+	set theNewMethodPrediction to update1Prediction(theMethodPrediction, (transactionMethod of theTransaction))
+	set theNewTypePrediction to update1Prediction(theTypePrediction, (typeOfTransaction of theTransaction))
+	-- Updating the spreadsheet with the new predictions
+	setCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRowNumber as text), theNewNamePrediction)
+	setCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRowNumber as text), theNewMethodPrediction)
+	setCellValue(filePath, theDocument, theSheet, theTable, ("D" & theRowNumber as text), theNewTypePrediction)
+end updatePredictionSpend
+
+on updatePredictionTransfer(filePath, theDocument, theTransaction, theRowNumber)
+	set theSheet to "Predicting Transaction Name"
+	set theTable to "Transfer"
+	-- Getting the current predictions
+	set theNamePrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRowNumber as text))
+	set theFromAccountPrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRowNumber as text))
+	set theToAccountPrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("D" & theRowNumber as text))
+	-- Getting the to and from account from the transaction
+	set theToFromList to getFromAndTo(transactionMethod of theTransaction)
+	set theFrom to (item 1 of theToFromList)
+	set theTo to (item 1 of theToFromList)
+	-- Updating the Predictions
+	set theNewNamePrediction to update1Prediction(theNamePrediction, (comment of theTransaction))
+	set theNewFromPrediction to update1Prediction(theFromAccountPrediction, theFrom)
+	set theNewToPrediction to update1Prediction(theToAccountPrediction, theTo)
+	-- Updating the Spreadsheet
+	setCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRowNumber as text), theNewNamePrediction)
+	setCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRowNumber as text), theNewFromPrediction)
+	setCellValue(filePath, theDocument, theSheet, theTable, ("D" & theRowNumber as text), theNewToPrediction)
+end updatePredictionTransfer
+
+on updatePredictionARAndEarn(filePath, theDocument, theTransaction, theType, theRowNumber)
+	set theSheet to "Predicting Transaction Name"
+	set theTable to theType
+	-- Getting the current predictions
+	set theNamePrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRowNumber as text))
+	set theOtherPrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRowNumber as text))
+	-- Updating Predictions 
+	set theNewNamePrediction to update1Prediction(theNamePrediction, (comment of theTransaction))
+	set theNewOtherPrediction to update1Prediction(theOtherPrediction, (transactionMethod of theTransaction))
+	-- Updating the spread sheet
+	setCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRowNumber as text), theNewNamePrediction)
+	setCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRowNumber as text), theNewOtherPrediction)
+end updatePredictionARAndEarn
+
+-- String Transaction -> String
+-- Updating the predictions with the information from the transaction
+on update1Prediction(prediction, theWord)
+	if prediction is missing value then
+		set newPredictionList to addPredictionOccurrence(theWord, {})
+		set theNewPrediction to listOfPredictionsToString(newPredictionList)
+		return theNewPrediction
+	else
+		set thePrediction to predictionsToListOfPredictions(prediction)
+		set newPredictionList to addPredictionOccurrence(theWord, thePrediction)
+		set theNewPrediction to listOfPredictionsToString(newPredictionList)
+		return theNewPrediction
+	end if
+end update1Prediction
+
+-- String -> [List-of String]
+-- Gets the from and to account from the format of the transaction tracking table
+on getFromAndTo(str)
+	set i to 1
+	repeat until (item i of str) is "-"
+		set i to i + 1
+	end repeat
+	set theFrom to ((items 1 thru (i - 2) of str) as text)
+	set theTo to ((items (i + 3) thru (count of str) of str) as text)
+	return {theFrom, theTo}
+end getFromAndTo
+
+-- String [List-of [List-of String]] -> [List-of [List-of String]]
+-- adds 1 to the value associated with the occurence of the string
+checkExpect((addPredictionOccurrence("Northeastern payroll", {{"Northeastern payroll", "1"}})), {{"Northeastern payroll", "2"}}, "add prediction occurence failed")
+checkExpect((addPredictionOccurrence("Buying whiteboard", {{"Northeastern payroll", "1"}})), {{"Northeastern payroll", "1"}, {"Buying whiteboard", "1"}}, "add prediction occurence failed")
+checkExpect((addPredictionOccurrence("Buying whiteboard", {{"Northeastern payroll", "1"}, {"Buying whiteboard", "1"}})), {{"Northeastern payroll", "1"}, {"Buying whiteboard", "2"}}, "add prediction occurence failed")
+checkExpect((addPredictionOccurrence("Random", {{"Northeastern payroll", "1"}, {"Buying whiteboard", "1"}})), {{"Northeastern payroll", "1"}, {"Buying whiteboard", "1"}, {"Random", "1"}}, "add prediction occurence failed")
+on addPredictionOccurrence(str, lops)
+	if doesPredictionExist(str, lops) is true then
+		set i to 1
+		repeat until (item 1 of (item i of lops)) is str
+			set i to i + 1
+		end repeat
+		set (item 2 of (item i of lops)) to ((item 2 of (item i of lops)) + 1 as text)
+	else
+		set lops to lops & {{str, "1"}}
+	end if
+	return lops
+end addPredictionOccurrence
+
+
+checkExpect((doesPredictionExist("Northeastern payroll", {{"Northeastern payroll", "1"}})), true, "does prediction exist failed")
+checkExpect((doesPredictionExist("whiteboard", {{"Northeastern payroll", "1"}})), false, "does prediction exist failed")
+checkExpect((doesPredictionExist("whiteboard", {{"Northeastern payroll", "1"}, {"credit card payment", "1"}, {"whiteboard", "1"}})), true, "does prediction exist failed")
+-- returns whether a prediction already exists
+on doesPredictionExist(str, lops)
+	repeat with i from 1 to (count of lops)
+		if (item 1 of (item i of lops)) is str then
+			return true
+		end if
+	end repeat
+	return false
+end doesPredictionExist
+
+
+(*-- Updates the prediction value of an Accounts Receivable and an Earning items
+on updateARAndEPredictCell(filePath, theDocument, theSheet, theTable, theTransaction)
+	set nameColumnName to getCellValue(filePath, theDocument, theSheet, theTable, "B1")
+	set accountColumnName to getCellValue(filePath, theDocument, theSheet, theTable, "C1")
+	set theAmount to (amount of theTransaction)
+	set nameCell to ((theAmount & " " & nameColumnName) as text)
+	set accountCell to ((theAmount & " " & accountColumnName) as text)
+	set namePredictions to getCellValue(filePath, theDocument, theSheet, theTable, nameCell)
+	set accountPredictions to getCellValue(filePath, theDocument, theSheet, theTable, accountCell)
+	set listOfAccountPredictions to predictionsToListOfPredictions(accountPredictions)
+	set listOfNamePredictions to predictionsToListOfPredictions(namePredictions)
+end updateARAndEPredictCell*)
+
+
+
+
+
+
+
+
+
+
+
+-- End adding an occurence of a probability from transaction tracking table
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+-- Start Making a new row for a prediction
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+on makeNewPredictionRowTransactionTracking(filePath, theDocument, theTransaction)
+	set theSheet to "Predicting Transaction Name"
+	set theType to (type of theTransaction)
+	set theAmount to (amount of theTransaction)
+	set theTable to getTableName(theTransaction)
+	makeNewRow(filePath, theDocument, theSheet, theTable)
+	set theRow to getRowCount(filePath, theDocument, theSheet, theTable)
+	setCellValue(filePath, theDocument, theSheet, theTable, ("A" & theRow as text), theAmount)
+	updateOldPredictionTransactionTracking(filePath, theDocument, theTransaction, theRow)
+end makeNewPredictionRowTransactionTracking
+
+on getTableName(theTransaction)
+	set theTable to (type of theTransaction)
+	return theTable
+end getTableName
+
+
+
+
+
+
+
+-- End making a new row for a prediction
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+-- Start Updating the Predicting Transactions
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- String String -> Nil
+-- Inserts all of the transactions from the transaction tracking page into predictions
+on predictionsFromTransactionTracking(filePath, theDocument)
+	set theSheet to "Transaction Tracking"
+	set theRowCount to getRowCount(filePath, theDocument, theSheet, theSheet)
+	repeat with i from 2 to theRowCount
+		set theTransaction to transactionTrackingToTransaction(filePath, theDocument, i)
+		set theTable to getTableName(theTransaction)
+		set itExists to checkValueInTable(filePath, theDocument, "Predicting Transaction Name", theTable, theTransaction)
+		if itExists is false then
+			makeNewPredictionRowTransactionTracking(filePath, theDocument, theTransaction)
+		else
+			updateOldPredictionTransactionTracking(filePath, theDocument, theTransaction, itExists)
+		end if
+		sortPredictRows(filePath, theDocument, "Predicting Transaction Name", theTable, "1")
+	end repeat
+end predictionsFromTransactionTracking
+
+
+-- Get the item from Transaction Tracking and Convert it into transaction
+
+-- String String Number -> Transaction
+-- Makes a transaction from the information given in the row
+on transactionTrackingToTransaction(filePath, theDocument, theRowNumber)
+	set theSheet to "Transaction Tracking"
+	set theTable to "Transaction Tracking"
+	set theType to getCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRowNumber as text))
+	set theAmount to getCellValue(filePath, theDocument, theSheet, theTable, ("D" & theRowNumber as text)) as number
+	set theTransactionMethod to getCellValue(filePath, theDocument, theSheet, theTable, ("E" & theRowNumber as text))
+	set theTransactionType to getCellValue(filePath, theDocument, theSheet, theTable, ("F" & theRowNumber as text))
+	set theComment to getCellValue(filePath, theDocument, theSheet, theTable, ("G" & theRowNumber as text))
+	set theTransaction to makeTransaction(theType, theAmount, theTransactionMethod, theTransactionType, theComment, current date)
+	return theTransaction
+end transactionTrackingToTransaction
+
+
+-- Check if the amount is already in the table
+
+-- String String String String Transaction -> Boolean
+-- Checks to see if the amount of the transaction is in the table
+on checkValueInTable(filePath, theDocument, theSheet, theTable, theTransaction)
+	set theValue to (amount of theTransaction)
+	set theColumn to "A"
+	set theRowCount to getRowCount(filePath, theDocument, theSheet, theTable)
+	if theRowCount < 3 then
+		set i to 0
+		set again to "yes"
+		repeat until again is "no"
+			set i to i + 1
+			set theValue2 to getCellValue(filePath, theDocument, theSheet, theTable, (theColumn & i as text))
+			if theValue2 is theValue then
+				set again to "no"
+				set valueExists to i
+			else if i is 2 then
+				set again to "no"
+				set valueExists to false
+			end if
+		end repeat
+	else
+		set valueExists to checkExists(filePath, theDocument, theSheet, theTable, theColumn, theValue, 1, theRowCount)
+	end if
+	return valueExists
+end checkValueInTable
+
+-- Stuff -> [Maybe Number]
+-- Determines if the amount is in the table or not
+on checkExists(filePath, theDocument, theSheet, theTable, theColumn, theValue, startCell, endCell)
+	set theRowCount to endCell - startCell
+	set theMiddle to round (theRowCount / 2)
+	set theMiddleRow to (startCell + theMiddle)
+	set theCell to ((theColumn & theMiddleRow) as text)
+	set theCellValue to getCellValue(filePath, theDocument, theSheet, theTable, theCell)
+	if (theValue = theCellValue) then
+		get "true"
+	else if theRowCount = 1 then
+		set theMiddleRow2 to theMiddleRow + 1
+		set theCell2 to ((theColumn & theMiddleRow2) as text)
+		set theCellValue2 to getCellValue(filePath, theDocument, theSheet, theTable, theCell2)
+		if (theValue = theCellValue2) then
+			get "true2"
+		else
+			get "false"
+		end if
+	else if (theValue > theCellValue) then
+		get "larger"
+	else if (theValue < theCellValue) then
+		get "smaller"
+	end if
+	set theResult to the result
+	if theResult is "true" then
+		return theMiddleRow
+	else if theResult is "true2" then
+		return theMiddleRow + 1
+	else if theResult is "false" then
+		return false
+	else if theResult is "larger" then
+		checkExists(filePath, theDocument, theSheet, theTable, theColumn, theValue, theMiddleRow, endCell)
+	else if theResult is "smaller" then
+		checkExists(filePath, theDocument, theSheet, theTable, theColumn, theValue, startCell, theMiddleRow)
+	end if
+end checkExists
+
+-- Sorts the values in the given table in ascending order
+on sortPredictRows(filePath, theDocument, theSheet, theTable, theColumn)
+	tell application "Numbers"
+		open filePath
+		tell document theDocument
+			tell sheet theSheet
+				tell table theTable
+					sort by (column theColumn) direction ascending
+				end tell
+			end tell
+		end tell
+	end tell
+end sortPredictRows
+
+
+
+
+
+-- End Updating the Predicting Transactions
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+-- Start Function to run at the end of a user transaction
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+-- String String -> Nil
+-- Inserts all of the transactions from the transaction tracking page into predictions
+on predictionsFromCollegeBudget(filePath, theDocument)
+	set theSheet to "Transaction Tracking"
+	set theRowCount to getRowCount(filePath, theDocument, theSheet, theSheet)
+	set theTransaction to transactionTrackingToTransaction(filePath, theDocument, theRowCount)
+	set theTable to getTableName(theTransaction)
+	set itExists to checkValueInTable(filePath, theDocument, "Predicting Transaction Name", theTable, theTransaction)
+	if itExists is false then
+		makeNewPredictionRowTransactionTracking(filePath, theDocument, theTransaction)
+	else
+		updateOldPredictionTransactionTracking(filePath, theDocument, theTransaction, itExists)
+	end if
+	sortPredictRows(filePath, theDocument, "Predicting Transaction Name", theTable, "1")
+end predictionsFromCollegeBudget
+
+
+
+
+
+
+
+-- End Function to run at the end of a user transaction
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+--predictionsFromCollegeBudget(filePath, theDocument)
+
+--predictionsFromTransactionTracking(filePath, theDocument)
+(*set theTransaction to makeTransaction("Spend", 2, "Credit Card", "Snacking out", "Coke from the vending machine", current date)
+checkValueInTable(filePath, theDocument, "Predicting Transaction Name", "Spend", theTransaction)*)
+
+
+-- Start Processing Predictions
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+-- Gets the prediction of a spending item
+on spendPredict(filePath, theDocument, theTransaction)
+	set theSheet to "Predicting Transaction Name"
+	set theTable to "Spend"
+	-- Gets the row number
+	set theRow to checkValueInTable(filePath, theDocument, theSheet, theTable, theTransaction)
+	if theRow is false then
+		return "None"
+	else
+		-- Gets the predictions
+		set theNamePrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRow as text))
+		set theMethodPrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRow as text))
+		set theTypePrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("D" & theRow as text))
+		-- Processes the Predictions
+		set bestNamePrediction to getBestPrediction(theNamePrediction)
+		set bestMethodPrediction to getBestPrediction(theMethodPrediction)
+		set bestTypePrediction to getBestPrediction(theTypePrediction)
+		return {bestNamePrediction, bestMethodPrediction, bestTypePrediction}
+	end if
+end spendPredict
+
+-- String -> String
+on getBestPrediction(prediction)
+	set theList to predictionsToListOfPredictions(prediction)
+	set theMostLikely to getMostLikely(theList)
+end getBestPrediction
+
+
+on getMostLikely(theList)
+	set theNumber to (item 2 of (item 1 of theList))
+	repeat with i from 2 to (count of theList)
+		if (item 2 of (item i of theList)) > theNumber then
+			set theNumber to (item 2 of (item i of theList))
+		end if
+	end repeat
+	repeat with i from 1 to (count of theList)
+		if (item 2 of (item i of theList)) is theNumber then
+			return (item 1 of (item i of theList))
+		end if
+	end repeat
+end getMostLikely
+
+
+
+-- Gets the prediction of a transfer item
+on transfersPredict(filePath, theDocument, theTransaction)
+	set theSheet to "Predicting Transaction Name"
+	set theTable to "Transfer"
+	-- Gets the row number
+	set theRow to checkValueInTable(filePath, theDocument, theSheet, theTable, theTransaction)
+	if theRow is false then
+		return "None"
+	else
+		-- Gets the predictions
+		set theNamePrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRow as text))
+		set theFromPrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRow as text))
+		set theToPrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("D" & theRow as text))
+		-- Processes the Predictions
+		set bestNamePrediction to getBestPrediction(theNamePrediction)
+		set bestFromPrediction to getBestPrediction(theFromPrediction)
+		set bestToPrediction to getBestPrediction(theToPrediction)
+		return {bestNamePrediction, bestFromPrediction, bestToPrediction}
+	end if
+end transfersPredict
+
+-- Gets the prediction of an earning item
+on earnPredict(filePath, theDocument, theTransaction)
+	set theSheet to "Predicting Transaction Name"
+	set theTable to "Earn"
+	arAndEPredict(filePath, theDocument, theSheet, theTable, theTransaction)
+end earnPredict
+
+-- Get the prediction of an accounts receivable item
+on arPredict(filePath, theDocument, theTransaction)
+	set theSheet to "Predicting Transaction Name"
+	set theTable to "Accounts Receivable"
+	arAndEPredict(filePath, theDocument, theSheet, theTable, theTransaction)
+end arPredict
+
+-- Gets the prediction of an accounts Receivable and an earning
+on arAndEPredict(filePath, theDocument, theSheet, theTable, theTransaction)
+	set theRow to checkValueInTable(filePath, theDocument, theSheet, theTable, theTransaction)
+	if theRow is false then
+		return "None"
+	else
+		-- Gets the predictions
+		set theNamePrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("B" & theRow as text))
+		set theAccountPrediction to getCellValue(filePath, theDocument, theSheet, theTable, ("C" & theRow as text))
+		-- Processes the Predictions
+		set bestNamePrediction to getBestPrediction(theNamePrediction)
+		set bestAccountPrediction to getBestPrediction(theAccountPrediction)
+		return {bestNamePrediction, bestAccountPrediction}
+	end if
+end arAndEPredict
+
+
+
+
+
+
+
+
+
+-- newARAndEPredictCell
+(*on newARAndEPredictCell(filePath, theDocument, theSheet, theTable, theTransaction)
+	set commentPrediction to (((comment of theTransaction) & "," & "1" & ";") as text)
+	set accountPrediction to (((transactionMethod of theTransaction) & "," & "1" & ";") as text)
+	set theValue to (amount of theTransaction)
+	makeNewRow(filePath, theDocument, theSheet, theTable)
+	set theRow to getRowCount(filePath, theDocument, theSheet, theTable)
+	set theValueCell to (("B" & theRow) as text)
+	set theCommentCell to (("B" & theRow) as text)
+	set theAccountCell to (("C" & theRow) as text)
+	setCellValue(filePath, theDocument, theSheet, theTable, theCommentCell, commentPrediction)
+	setCellValue(filePath, theDocument, theSheet, theTable, theValueCell, theValue)
+	setCellValue(filePath, theDocument, theSheet, theTable, theAccountCell, accountPrediction)
+end newARAndEPredictCell*)
+
+
+
+
+
+
+-- End Processing Predictions
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+-- Nil -> Display Dialog
+-- Creates a display dialog with all the totals
+on popupDialog(filePath, theDocument)
+	set savingsTotal to insertThousandSeparator(getCellValue(filePath, theDocument, "Budget", "Account Balances", "B2"))
+	set creditCardTotal to insertThousandSeparator(getCellValue(filePath, theDocument, "Budget", "Account Balances", "B3"))
+	set checkingTotal to insertThousandSeparator(getCellValue(filePath, theDocument, "Budget", "Account Balances", "B4"))
+	set cashTotal to insertThousandSeparator(getCellValue(filePath, theDocument, "Budget", "Account Balances", "B5"))
+	set venmoTotal to insertThousandSeparator(getCellValue(filePath, theDocument, "Budget", "Account Balances", "B6"))
+	set longTermEquity to insertThousandSeparator(getCellValue(filePath, theDocument, "Budget", "Balance Sheet", "B15"))
+	set longTermEquity to insertThousandSeparator(round (longTermEquity))
+	set shortTermEquity to insertThousandSeparator(getCellValue(filePath, theDocument, "Budget", "Balance Sheet", "B14"))
+	set amountRemainingInBudget to insertThousandSeparator(getCellValue(filePath, theDocument, "Budget", "Semester Totals", "B6"))
+	display dialog "	Total in Saving is $" & savingsTotal & "
+	Total in Credit Card is " & ("$" & creditCardTotal) & "
+	Total in Checking is " & ("$" & checkingTotal) & "
+	Total in Cash is " & ("$" & cashTotal) & "
+	Total in Venmo is " & ("$" & venmoTotal) & "
+	
+	Your total Short Term Equity is " & ("$" & shortTermEquity) & "
+	Your total Long Term Equity is " & ("$" & longTermEquity) & "
+	The amount remaining in your semester budget is 
+	" & ("$" & amountRemainingInBudget)
+end popupDialog
+
+checkExpect((insertThousandSeparator(2500.01)), "2,500.01", "InsertThousandsSeparator Failed")
+-- Number -> String
+-- Inserts the thousands separator
+on insertThousandSeparator(num)
+	set theParts to separateAtDecimal(num)
+	set aboveZero to (insertComma(whole of theParts))
+	set belowZero to (decimal of theParts)
+	if belowZero is ".00" then
+		set theNumber to aboveZero
+	else
+		set theNumber to aboveZero & belowZero
+	end if
+	return theNumber
+end insertThousandSeparator
+
+checkExpect((separateAtDecimal(2500.01)), {whole:"2500", decimal:".01"}, "SeparateAtDecimal Failed")
+checkExpect((separateAtDecimal(2500)), {whole:"2500", decimal:".00"}, "SeparateAtDecimal Failed")
+checkExpect((separateAtDecimal(0.01)), {whole:"0", decimal:".01"}, "SeparateAtDecimal Failed")
+-- Number -> {whole: num decimal: num}
+-- Separates the number into the left side of
+-- the decimal and the right side of the decimal
+on separateAtDecimal(num)
+	set num to num as string
+	set i to 1
+	repeat until (item i of num) is "." or i = (count of num)
+		set i to i + 1
+	end repeat
+	if i = (count of num) then
+		set theWhole to num
+	else
+		try
+			set theWhole to ((items 1 thru (i - 1) of num) as string)
+		on error
+			set theWhole to 0
+		end try
+	end if
+	if i = (count of num) then
+		set theDecimal to ".00"
+	else
+		set theDecimal to ((items i thru (count of num) of num) as string)
+	end if
+	return {whole:theWhole, decimal:theDecimal}
+end separateAtDecimal
+
+checkExpect((insertComma("5000")), "5,000", "InsertComma Failed")
+checkExpect((insertComma("50000")), "50,000", "InsertComma Failed")
+checkExpect((insertComma("500000")), "500,000", "InsertComma Failed")
+checkExpect((insertComma("500")), "500", "InsertComma Failed")
+checkExpect((insertComma("5")), "5", "InsertComma Failed")
+-- String or number -> String
+-- Inserts a comma into every 3rd place from the end of the string
+on insertComma(str)
+	set str to reverse of characters of str as string
+	if ((count of str) ≤ 3) then
+		set again to false
+		set theList to str
+	else
+		set again to true
+		set theList to {}
+	end if
+	repeat until again is false
+		if (count of str) > 3 then
+			set partOne to (items 1 thru 3 of str) & ","
+			set str to items 4 thru (count of str) of str
+		else
+			set partOne to str
+			set str to ""
+		end if
+		if str is "" then set again to false
+		set theList to theList & partOne
+	end repeat
+	set theList to reverseAllInList(theList)
+	return theList as string
+end insertComma
+
+checkExpect((reverseAllInList({"Hello", "Goodbye", "Yellow"})), {"wolleY", "eybdooG", "olleH"}, "ReverseAllInList Failed")
+-- [List-of String] -> [List-of String]
+-- Reverses all the strings in the list of strings and reverses the list of strings
+on reverseAllInList(los)
+	set theList to {}
+	repeat with i from 1 to (count of los)
+		set theReverse to ((reverse of characters of (item i of los)) as text)
+		set theList to theList & theReverse
+	end repeat
+	set theList to reverse of theList
+	return theList
+end reverseAllInList
+
+-- String, String -> Nil
+-- Calls all the functions to input things into the spreadsheet
+on main(filePath, theDocument, transactionTypes, transactionMethods, purchaseTypes, theAccounts)
+	set theTransaction to createTransaction(filePath, theDocument, transactionTypes, transactionMethods, purchaseTypes, theAccounts)
+	if ((amount of theTransaction) < 0) and ((typeOfTransaction of theTransaction) is "Accounts Receivable") then
+		switch()
+		choose from list theAccounts with prompt "Which account did you receive the money?" default items (item 1 of theAccounts)
+		set theAccount to the result as text
+		set theNewTransaction to {type:"earn", amount:((amount of theTransaction) * -1), transactionMethod:theAccount, typeOfTransaction:"Earnings", comment:(comment of theTransaction), dateOfTransaction:(dateOfTransaction of theTransaction)}
+		inputTransaction(filePath, theDocument, theNewTransaction)
+		insertTransaction(filePath, theDocument, theNewTransaction)
+	end if
+	inputTransaction(filePath, theDocument, theTransaction)
+	insertTransaction(filePath, theDocument, theTransaction)
+	switch()
+	(*popupDialog(filePath, theDocument)
+	saveAndQuit()*)
+end main
+
+
+-- Nil -> Nil
+-- Saves all numbers documents and quits numbers
+on saveAndQuit()
+	tell application "Numbers"
+		repeat with i from 1 to (number of documents)
+			save document i
+		end repeat
+		quit
+	end tell
+end saveAndQuit
+
+on main2(filePath, theDocument, transactionTypes, transactionMethods, purchaseTypes, theAccounts)
+	set goAgain to true
+	repeat while goAgain is true
+		main(filePath, theDocument, transactionTypes, transactionMethods, purchaseTypes, theAccounts)
+		display dialog "Would you like to make another transaction?" buttons {"Yes", "No", "Cancel"} default button 1
+		if the button returned of the result is "Yes" then
+			set goAgain to true
+		else if the button returned of the result is "No" then
+			set goAgain to false
+		end if
+		predictionsFromCollegeBudget(filePath, theDocument)
+	end repeat
+	popupDialog(filePath, theDocument)
+	saveAndQuit()
+end main2
+--popupDialog(filePath, theDocument)
+
+
+main2(filePath, theDocument, transactionTypes, transactionMethods, purchaseTypes, theAccounts)
+
+
+
